@@ -4,8 +4,6 @@ import { Camera, Trash2, Save, Truck, Users, Box, ArrowRight, Minus, Plus, Alert
 // URL de déploiement de votre Google Apps Script (À REMPLACER IMPÉRATIVEMENT)
 const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbww2G_N9JwKlhErDrBo0W2_Q4Y9Ytbo2386D1Tvt2E6O8AZfCuDQC4UxMP8w3B4mm4/exec"; 
 
-
-
 // --- VALEURS PAR DÉFAUT (Fallback Offline) ---
 // Liste simplifiée regroupant les standards similaires
 const DEFAULT_ITEMS = {
