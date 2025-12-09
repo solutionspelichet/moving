@@ -5,6 +5,7 @@ import { Camera, Trash2, Save, Truck, Users, Box, ArrowRight, Minus, Plus, Alert
 const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbww2G_N9JwKlhErDrBo0W2_Q4Y9Ytbo2386D1Tvt2E6O8AZfCuDQC4UxMP8w3B4mm4/exec"; 
 
 
+
 // --- VALEURS PAR DÉFAUT (Fallback Offline) ---
 // Liste simplifiée regroupant les standards similaires
 const DEFAULT_ITEMS = {
@@ -53,10 +54,11 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedMission, setSelectedMission] = useState(null);
 
+  // Ajout de 'photos' dans l'état initial
   const [mission, setMission] = useState({
     clientName: '', siteName: '', floor: '0', distance: '', elevator: true,
     elevatorDims: { w: '', d: '', h: '', weight: '' }, 
-    parkingDistance: '0', stairs: 0, comments: '', voiceNotes: [], gps: null 
+    parkingDistance: '0', stairs: 0, comments: '', voiceNotes: [], photos: [], gps: null 
   });
 
   const [inventory, setInventory] = useState({});
@@ -114,6 +116,28 @@ export default function App() {
       }
       return { ...prev, [itemId]: { ...current, [field]: newVal } };
     });
+  };
+
+  // --- GESTION PHOTOS ---
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setMission(prev => ({
+          ...prev,
+          photos: [...(prev.photos || []), { id: Date.now(), data: reader.result }]
+        }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const deletePhoto = (id) => {
+    setMission(prev => ({
+      ...prev,
+      photos: prev.photos.filter(p => p.id !== id)
+    }));
   };
 
   // --- CALCULATEUR COMPLET ---
@@ -186,9 +210,6 @@ export default function App() {
 
     // 4. Coûts
     const tripDist = parseFloat(mission.distance) || 0;
-    // On compte l'aller-retour total (client -> b -> client) mais le paramètre est souvent la distance A->B
-    // Prompt: "distance entre le point de depart et d arrivee".
-    // Estimons le trajet total facturable = (Distance x 2).
     const totalKm = tripDist * 2;
     const extraKm = Math.max(0, totalKm - (configParams.km_inc || 50));
 
@@ -245,7 +266,7 @@ export default function App() {
       await fetch(GAS_ENDPOINT, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       alert("Envoyé !");
       setInventory({});
-      setMission({ ...mission, comments: '', voiceNotes: [], gps: null, distance: '' });
+      setMission({ ...mission, comments: '', voiceNotes: [], photos: [], gps: null, distance: '' });
       setStep(1);
     } catch (e) {
       alert("Erreur envoi. Sauvegardé localement.");
@@ -352,7 +373,26 @@ export default function App() {
         </div>
         <div className="bg-white rounded-xl shadow p-4">
           <textarea className="w-full border rounded p-2 text-sm mb-3" rows="3" placeholder="Commentaires..." value={mission.comments} onChange={e => setMission({...mission, comments: e.target.value})} />
-          <div className="flex justify-between items-center mb-2"><span className="text-sm font-bold">Notes Vocales</span>{!isRecording ? <button onClick={startRecording} className="bg-red-100 text-red-600 px-3 py-1 rounded-full text-xs font-bold"><Mic size={14}/> Rec</button> : <button onClick={stopRecording} className="bg-red-600 text-white px-3 py-1 rounded-full text-xs animate-pulse"><StopCircle size={14}/> Stop</button>}</div>
+          
+          {/* SECTION PHOTOS AJOUTÉE */}
+          <div className="flex justify-between items-center mb-2 mt-4 border-t pt-4">
+            <span className="text-sm font-bold text-gray-700">Photos</span>
+            <label className="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 cursor-pointer hover:bg-blue-200">
+              <Camera size={14}/> Ajouter
+              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
+            </label>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {mission.photos && mission.photos.map(p => (
+              <div key={p.id} className="relative aspect-square bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
+                <img src={p.data} alt="Prise de vue" className="w-full h-full object-cover" />
+                <button onClick={() => deletePhoto(p.id)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 shadow-sm"><X size={10}/></button>
+              </div>
+            ))}
+            {(!mission.photos || mission.photos.length === 0) && <div className="text-xs text-gray-400 italic col-span-3 text-center py-2">Aucune photo.</div>}
+          </div>
+
+          <div className="flex justify-between items-center mb-2 border-t pt-4"><span className="text-sm font-bold">Notes Vocales</span>{!isRecording ? <button onClick={startRecording} className="bg-red-100 text-red-600 px-3 py-1 rounded-full text-xs font-bold"><Mic size={14}/> Rec</button> : <button onClick={stopRecording} className="bg-red-600 text-white px-3 py-1 rounded-full text-xs animate-pulse"><StopCircle size={14}/> Stop</button>}</div>
           <div className="space-y-2">{mission.voiceNotes.map((n, i) => <div key={n.id} className="flex justify-between bg-gray-50 p-2 rounded"><button onClick={() => playVoiceNote(n.data)}><Play size={12}/></button> Note {i+1} <button onClick={() => deleteVoiceNote(n.id)}><X size={14}/></button></div>)}</div>
         </div>
         <button onClick={handleSubmit} disabled={loading} className={`w-full py-4 rounded-xl font-bold shadow-lg text-white flex justify-center items-center gap-2 ${loading ? 'bg-gray-400' : 'bg-green-600'}`}>{loading ? 'Envoi...' : <><Save size={20}/> Valider</>}</button>
@@ -390,5 +430,7 @@ export default function App() {
      );
   }
 
+  return null;
+}
   return null;
 }
