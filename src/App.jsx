@@ -4,24 +4,35 @@ import { Camera, Trash2, Save, Truck, Users, Box, ArrowRight, Minus, Plus, Alert
 // URL de déploiement de votre Google Apps Script (À REMPLACER IMPÉRATIVEMENT)
 const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbww2G_N9JwKlhErDrBo0W2_Q4Y9Ytbo2386D1Tvt2E6O8AZfCuDQC4UxMP8w3B4mm4/exec"; 
 
-// --- VALEURS PAR DÉFAUT (Fallback Offline) ---
-// Liste simplifiée regroupant les standards similaires
+
+// --- VALEURS PAR DÉFAUT (Standards Techniques Détaillés) ---
 const DEFAULT_ITEMS = {
   furniture: [
-    { id: 'workstation_full', name: 'Poste Travail Complet', vol: 4.0 }, // Bureau + Chaise + Caisson
+    { id: 'workstation_full', name: 'Poste Travail Complet (Bur+Chaise+Caisson)', vol: 4.0 },
     { id: 'desk_simple', name: 'Bureau Seul', vol: 1.5 },
-    { id: 'chair_office', name: 'Chaise', vol: 0.3 },
-    { id: 'storage_cabinet', name: 'Armoire Haute', vol: 1.5 },
-    { id: 'storage_low', name: 'Meuble Bas / Caisson', vol: 0.4 },
+    { id: 'chair_office', name: 'Chaise (Visiteur/Empilable)', vol: 0.3 },
+    { id: 'storage_cabinet', name: 'Armoire Métallique Pleine', vol: 1.5 },
+    { id: 'storage_low', name: 'Caisson / Meuble Bas', vol: 0.4 },
+    { id: 'shelf', name: 'Étagère / Bibliothèque', vol: 2.0 },
+    { id: 'storage_drawer', name: 'Tiroir Classement Vertical', vol: 1.2 },
+    { id: 'storage_locker', name: 'Casiers Personnels (8 portes)', vol: 1.5 },
+    { id: 'coat_rack', name: 'Vestiaire Métallique Double', vol: 2.0 },
     { id: 'meeting_table', name: 'Table Réunion (8-10p)', vol: 9.0 },
-    { id: 'booth', name: 'Cabine/Box Acoustique', vol: 4.0 }, // Moyenne 1p/4p
+    { id: 'meeting_table_small', name: 'Table Cafétéria (4p)', vol: 1.8 },
+    { id: 'booth_1p', name: 'Cabine Acoustique (1p)', vol: 4.0 },
+    { id: 'booth_4p', name: 'Box Acoustique (4p)', vol: 6.0 },
     { id: 'sofa', name: 'Canapé / Détente', vol: 3.0 },
-    { id: 'misc_large', name: 'Divers Volumineux (Frigo/Vestiaire)', vol: 2.0 },
+    { id: 'coffee_table', name: 'Table Basse', vol: 0.9 },
+    { id: 'high_table', name: 'Table Haute / Mange-debout', vol: 1.2 },
+    { id: 'board', name: 'Tableau Blanc / Panneau', vol: 0.8 },
+    { id: 'plant', name: 'Plante en pot', vol: 0.5 },
   ],
   it: [
-    { id: 'it_station', name: 'Poste IT (Ecran+UC)', vol: 0.8 },
-    { id: 'printer_lg', name: 'Copieur Multifonction', vol: 1.4 },
-    { id: 'printer_sm', name: 'Petite Imprimante', vol: 0.8 },
+    { id: 'it_station', name: 'Poste IT Complet (Ecran+UC)', vol: 0.8 },
+    { id: 'printer_sm', name: 'Imprimante Standard', vol: 0.8 },
+    { id: 'printer_lg', name: 'Copieur Multifonction A3', vol: 1.4 },
+    { id: 'fridge', name: 'Réfrigérateur Bureau', vol: 1.2 },
+    { id: 'coffee_machine', name: 'Machine à Café Pro', vol: 0.7 },
   ],
   boxes: [
     { id: 'box_std', name: 'Carton Standard', vol: 0.1 },
@@ -30,12 +41,18 @@ const DEFAULT_ITEMS = {
 };
 
 const DEFAULT_PARAMS = {
+  // Productivité
   prod_std: 7.0, prod_easy: 9.0, prod_hard: 5.0,
-  van_cap: 12.0, truck_cap: 17.0,
+  // Véhicules
+  van_cap: 12.0, truck_cap: 17.0, // Capacité utile petit porteur
+  // Coûts Main d'oeuvre
   man_day: 400,
+  // Coûts Véhicules (Jour / Demi-Journée)
   van_day: 150, van_half: 75,
   truck_day: 350, truck_half: 250,
+  // Frais Km
   km_inc: 50, km_rate_van: 0.8, km_rate_truck: 1.5,
+  // Matériel
   mat_rate: 5
 };
 
@@ -71,8 +88,10 @@ export default function App() {
         const response = await fetch(`${GAS_ENDPOINT}?action=config`);
         const json = await response.json();
         if (json.status === 'success') {
-          setConfigItems(json.data.items);
-          setConfigParams(json.data.params);
+          // On garde la structure locale par défaut si le sheet est vide ou partiel pour éviter les bugs
+          // Ici on pourrait fusionner, pour l'instant on remplace si données présentes
+          if (json.data.items && Object.keys(json.data.items).length > 0) setConfigItems(json.data.items);
+          if (json.data.params && Object.keys(json.data.params).length > 0) setConfigParams(json.data.params);
           setConfigLoaded(true);
         }
       } catch (e) { console.warn("Offline config", e); }
@@ -173,7 +192,6 @@ export default function App() {
     const manDays = totalHandlingVol > 0 ? Math.ceil((totalHandlingVol / productivityPerMan) * 10) / 10 : 0;
 
     // 2. Véhicules (Fourgon vs Camion)
-    // Seuil de bascule Fourgon/Camion : 12m3 (Capacité fourgon)
     const VAN_CAP = configParams.van_cap || 12;
     const TRUCK_CAP = configParams.truck_cap || 17;
     
@@ -181,6 +199,7 @@ export default function App() {
     let vehicleCount = 0;
     let vehicleLabel = '';
 
+    // Logique: Si volume <= 12m3 -> Fourgon, sinon Camion(s)
     if (totalVol <= VAN_CAP && totalVol > 0) {
         vehicleType = 'van';
         vehicleCount = Math.ceil(totalVol / VAN_CAP);
@@ -193,8 +212,8 @@ export default function App() {
         vehicleLabel = 'Aucun';
     }
 
-    // 3. Durée de location estimée (basée sur JH et Volume)
-    // Hypothèse simple : Si petit volume (<15m3), 0.5j possible, sinon 1j mini
+    // 3. Durée et Tarif (Journée / Demi-journée)
+    // Règle: 0.5j possible si JH <= 0.6 (~4-5h à 2 hommes) ET volume < 15m3
     let rentalDays = 1;
     let isHalfDay = false;
     
@@ -202,25 +221,38 @@ export default function App() {
         rentalDays = 0.5;
         isHalfDay = true;
     } else {
-        rentalDays = Math.ceil(manDays / 2); // Hypothèse: équipe de 2 min
-        if (rentalDays < 1) rentalDays = 1;
+        // Durée min 1 jour si ça dépasse la demi-journée
+        // Si gros déménagement, on compte en jours pleins
+        rentalDays = Math.max(1, Math.ceil(manDays / 2)); // Hypothèse équipe de 2 min
     }
 
     // 4. Coûts
     const tripDist = parseFloat(mission.distance) || 0;
+    // Aller-retour total estimé
     const totalKm = tripDist * 2;
-    const extraKm = Math.max(0, totalKm - (configParams.km_inc || 50));
+    // Franchise km incluse (ex: 50km)
+    const kmIncluded = configParams.km_inc || 50;
+    const extraKm = Math.max(0, totalKm - kmIncluded);
 
     let costVehicleBase = 0;
     let costKm = 0;
 
     if (vehicleType === 'van') {
+        // Tarification Fourgon
         const rate = isHalfDay ? (configParams.van_half || 75) : (configParams.van_day || 150);
-        costVehicleBase = vehicleCount * rate * Math.ceil(rentalDays); // Location
+        costVehicleBase = vehicleCount * rate * Math.ceil(rentalDays); // Location (Note: demi-journée compte comme 0.5 dans le calcul si on veut, ou forfait)
+        // Ici on applique le taux forfaitaire: si 0.5j -> tarif demi, si >0.5j -> tarif jour * nb jours
+        if (!isHalfDay) costVehicleBase = vehicleCount * (configParams.van_day || 150) * rentalDays;
+        
         costKm = vehicleCount * extraKm * (configParams.km_rate_van || 0.8);
     } else {
+        // Tarification Camion
         const rate = isHalfDay ? (configParams.truck_half || 250) : (configParams.truck_day || 350);
-        costVehicleBase = vehicleCount * rate * Math.ceil(rentalDays);
+        if (isHalfDay) {
+             costVehicleBase = vehicleCount * rate;
+        } else {
+             costVehicleBase = vehicleCount * (configParams.truck_day || 350) * rentalDays;
+        }
         costKm = vehicleCount * extraKm * (configParams.km_rate_truck || 1.5);
     }
 
@@ -231,8 +263,8 @@ export default function App() {
 
     return { 
         moveVol: totalVol, trashVol, manDays, 
-        vehicleLabel, vehicleCount, vehicleType, rentalDays,
-        extraKm, costKm,
+        vehicleLabel, vehicleCount, vehicleType, rentalDays, isHalfDay,
+        extraKm, costKm, costVehicleBase,
         estimatedCostTotal, difficultyLabel 
     };
   }, [inventory, mission, configItems, configParams]);
@@ -360,8 +392,10 @@ export default function App() {
           </div>
           <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 gap-4 text-center">
             <div><div className="text-xl font-bold">{stats.manDays}</div><div className="text-xs text-gray-500">Jours-Hommes</div><div className="text-[10px] text-gray-400">Base {stats.productivityUsed} m³/j</div></div>
-            <div><div className="text-xl font-bold">{stats.vehicleLabel}</div><div className="text-xs text-gray-500">{stats.rentalDays} jour(s)</div>
-            {stats.extraKm > 0 && <div className="text-[10px] text-red-500">+{Math.round(stats.extraKm)} km suppl.</div>}
+            <div>
+              <div className="text-xl font-bold">{stats.vehicleLabel}</div>
+              <div className="text-xs text-gray-500">{stats.rentalDays} {stats.isHalfDay ? 'demi-journée' : 'jour(s)'}</div>
+              {stats.extraKm > 0 && <div className="text-[10px] text-red-500">+{Math.round(stats.extraKm)} km suppl.</div>}
             </div>
           </div>
         </div>
@@ -428,7 +462,5 @@ export default function App() {
      );
   }
 
-  return null;
-}
   return null;
 }
