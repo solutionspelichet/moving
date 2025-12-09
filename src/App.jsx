@@ -4,32 +4,39 @@ import { Camera, Trash2, Save, Truck, Users, Box, ArrowRight, Minus, Plus, Alert
 // URL de déploiement de votre Google Apps Script (À REMPLACER IMPÉRATIVEMENT)
 const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbww2G_N9JwKlhErDrBo0W2_Q4Y9Ytbo2386D1Tvt2E6O8AZfCuDQC4UxMP8w3B4mm4/exec"; 
 
-// --- VALEURS PAR DÉFAUT (Fallback si hors ligne) ---
+
+// --- VALEURS PAR DÉFAUT (Fallback Offline) ---
+// Liste simplifiée regroupant les standards similaires
 const DEFAULT_ITEMS = {
   furniture: [
-    { id: 'workstation', name: 'Poste de travail complet', vol: 4.0 },
-    { id: 'meeting_room', name: 'Ens. Salle Réunion (10p)', vol: 9.0 },
-    { id: 'desk', name: 'Bureau seul', vol: 1.5 },
-    { id: 'chair', name: 'Chaise seule', vol: 0.3 },
-    { id: 'cabinet', name: 'Armoire métallique (Pleine)', vol: 1.5 },
-    { id: 'booth', name: 'Cabine Acoustique', vol: 4.0 },
+    { id: 'workstation_full', name: 'Poste Travail Complet', vol: 4.0 }, // Bureau + Chaise + Caisson
+    { id: 'desk_simple', name: 'Bureau Seul', vol: 1.5 },
+    { id: 'chair_office', name: 'Chaise', vol: 0.3 },
+    { id: 'storage_cabinet', name: 'Armoire Haute', vol: 1.5 },
+    { id: 'storage_low', name: 'Meuble Bas / Caisson', vol: 0.4 },
+    { id: 'meeting_table', name: 'Table Réunion (8-10p)', vol: 9.0 },
+    { id: 'booth', name: 'Cabine/Box Acoustique', vol: 4.0 }, // Moyenne 1p/4p
+    { id: 'sofa', name: 'Canapé / Détente', vol: 3.0 },
+    { id: 'misc_large', name: 'Divers Volumineux (Frigo/Vestiaire)', vol: 2.0 },
   ],
   it: [
-    { id: 'it_station', name: 'Poste IT Complet', vol: 0.75 },
-    { id: 'printer_lg', name: 'Copieur MF', vol: 1.0 },
+    { id: 'it_station', name: 'Poste IT (Ecran+UC)', vol: 0.8 },
+    { id: 'printer_lg', name: 'Copieur Multifonction', vol: 1.4 },
+    { id: 'printer_sm', name: 'Petite Imprimante', vol: 0.8 },
   ],
   boxes: [
     { id: 'box_std', name: 'Carton Standard', vol: 0.1 },
+    { id: 'box_arch', name: 'Carton Archive', vol: 0.05 },
   ]
 };
 
 const DEFAULT_PARAMS = {
-  prod_std: 7.0,
-  prod_easy: 9.0,
-  prod_hard: 5.0,
-  truck_cap: 17.0,
+  prod_std: 7.0, prod_easy: 9.0, prod_hard: 5.0,
+  van_cap: 12.0, truck_cap: 17.0,
   man_day: 400,
-  truck_day: 175,
+  van_day: 150, van_half: 75,
+  truck_day: 350, truck_half: 250,
+  km_inc: 50, km_rate_van: 0.8, km_rate_truck: 1.5,
   mat_rate: 5
 };
 
@@ -38,19 +45,16 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   
-  // Configuration dynamique
   const [configItems, setConfigItems] = useState(DEFAULT_ITEMS);
   const [configParams, setConfigParams] = useState(DEFAULT_PARAMS);
   const [configLoaded, setConfigLoaded] = useState(false);
 
-  // Historique
   const [historyData, setHistoryData] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedMission, setSelectedMission] = useState(null);
 
-  // Données Mission
   const [mission, setMission] = useState({
-    clientName: '', siteName: '', floor: '0', elevator: true,
+    clientName: '', siteName: '', floor: '0', distance: '', elevator: true,
     elevatorDims: { w: '', d: '', h: '', weight: '' }, 
     parkingDistance: '0', stairs: 0, comments: '', voiceNotes: [], gps: null 
   });
@@ -61,27 +65,21 @@ export default function App() {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  // --- CHARGEMENT CONFIGURATION ---
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        // Appel avec paramètre action=config
         const response = await fetch(`${GAS_ENDPOINT}?action=config`);
         const json = await response.json();
         if (json.status === 'success') {
           setConfigItems(json.data.items);
           setConfigParams(json.data.params);
           setConfigLoaded(true);
-          console.log("Configuration chargée depuis GSheet");
         }
-      } catch (e) {
-        console.warn("Utilisation config par défaut (Offline ?)", e);
-      }
+      } catch (e) { console.warn("Offline config", e); }
     };
     if (GAS_ENDPOINT.startsWith('http')) fetchConfig();
   }, []);
 
-  // --- LOGIQUE METIER ---
   const getGPS = () => {
     if (!navigator.geolocation) { alert("Pas de GPS"); return; }
     setGpsLoading(true);
@@ -98,10 +96,10 @@ export default function App() {
   const fetchHistory = async () => {
     setHistoryLoading(true);
     try {
-      const response = await fetch(GAS_ENDPOINT); // action=history par défaut
+      const response = await fetch(GAS_ENDPOINT);
       const json = await response.json();
       if (json.status === 'success') setHistoryData(json.data);
-    } catch (e) { alert("Impossible de charger l'historique"); }
+    } catch (e) { alert("Erreur historique"); }
     finally { setHistoryLoading(false); }
   };
 
@@ -118,23 +116,21 @@ export default function App() {
     });
   };
 
-  // --- CALCULATEUR DYNAMIQUE ---
+  // --- CALCULATEUR COMPLET ---
   const stats = useMemo(() => {
-    let totalVol = 0, trashVol = 0, itemCount = 0;
+    let totalVol = 0, trashVol = 0;
     
-    // Utilisation de la config chargée (configItems) au lieu de la constante
     Object.entries(inventory).forEach(([id, data]) => {
       const itemDef = Object.values(configItems).flat().find(i => i.id === id);
       if (itemDef) {
         totalVol += data.count * itemDef.vol;
         trashVol += data.trash * itemDef.vol;
-        itemCount += data.count + data.trash;
       }
     });
 
     const totalHandlingVol = totalVol + trashVol;
 
-    // Utilisation des paramètres chargés (configParams)
+    // 1. Productivité
     let productivityPerMan = configParams.prod_std || 7; 
     let difficultyLabel = "Standard";
 
@@ -142,34 +138,86 @@ export default function App() {
         if (mission.parkingDistance === '0-10m') {
             productivityPerMan = configParams.prod_easy || 9;
             difficultyLabel = "Facile";
-        } else {
-            productivityPerMan = configParams.prod_std || 7;
         }
     } else {
         productivityPerMan = configParams.prod_hard || 5;
         difficultyLabel = "Difficile";
     }
-
     if (mission.parkingDistance === '>50m') {
         productivityPerMan -= 1; 
         difficultyLabel += " + Portage";
     }
 
     const manDays = totalHandlingVol > 0 ? Math.ceil((totalHandlingVol / productivityPerMan) * 10) / 10 : 0;
-    const trucks20 = Math.ceil(totalVol / (configParams.truck_cap || 17));
 
-    // Coûts dynamiques
-    const costMan = configParams.man_day || 400;
-    const costTruck = configParams.truck_day || 175;
-    const costMat = configParams.mat_rate || 5;
+    // 2. Véhicules (Fourgon vs Camion)
+    // Seuil de bascule Fourgon/Camion : 12m3 (Capacité fourgon)
+    const VAN_CAP = configParams.van_cap || 12;
+    const TRUCK_CAP = configParams.truck_cap || 17;
+    
+    let vehicleType = 'van';
+    let vehicleCount = 0;
+    let vehicleLabel = '';
 
-    const estimatedCostMin = Math.round((manDays * costMan) + (trucks20 * costTruck));
-    const estimatedCostMax = Math.round((manDays * (costMan * 1.15)) + (trucks20 * (costTruck * 1.15)) + (totalVol * costMat));
+    if (totalVol <= VAN_CAP && totalVol > 0) {
+        vehicleType = 'van';
+        vehicleCount = Math.ceil(totalVol / VAN_CAP);
+        vehicleLabel = `${vehicleCount} Fourgon(s)`;
+    } else if (totalVol > 0) {
+        vehicleType = 'truck';
+        vehicleCount = Math.ceil(totalVol / TRUCK_CAP);
+        vehicleLabel = `${vehicleCount} Camion(s)`;
+    } else {
+        vehicleLabel = 'Aucun';
+    }
 
-    return { moveVol: totalVol, trashVol, manDays, trucks20, productivityUsed: productivityPerMan, difficultyLabel, estimatedCostMin, estimatedCostMax };
+    // 3. Durée de location estimée (basée sur JH et Volume)
+    // Hypothèse simple : Si petit volume (<15m3), 0.5j possible, sinon 1j mini
+    let rentalDays = 1;
+    let isHalfDay = false;
+    
+    if (manDays <= 0.6 && totalVol < 15) {
+        rentalDays = 0.5;
+        isHalfDay = true;
+    } else {
+        rentalDays = Math.ceil(manDays / 2); // Hypothèse: équipe de 2 min
+        if (rentalDays < 1) rentalDays = 1;
+    }
+
+    // 4. Coûts
+    const tripDist = parseFloat(mission.distance) || 0;
+    // On compte l'aller-retour total (client -> b -> client) mais le paramètre est souvent la distance A->B
+    // Prompt: "distance entre le point de depart et d arrivee".
+    // Estimons le trajet total facturable = (Distance x 2).
+    const totalKm = tripDist * 2;
+    const extraKm = Math.max(0, totalKm - (configParams.km_inc || 50));
+
+    let costVehicleBase = 0;
+    let costKm = 0;
+
+    if (vehicleType === 'van') {
+        const rate = isHalfDay ? (configParams.van_half || 75) : (configParams.van_day || 150);
+        costVehicleBase = vehicleCount * rate * Math.ceil(rentalDays); // Location
+        costKm = vehicleCount * extraKm * (configParams.km_rate_van || 0.8);
+    } else {
+        const rate = isHalfDay ? (configParams.truck_half || 250) : (configParams.truck_day || 350);
+        costVehicleBase = vehicleCount * rate * Math.ceil(rentalDays);
+        costKm = vehicleCount * extraKm * (configParams.km_rate_truck || 1.5);
+    }
+
+    const costMan = manDays * (configParams.man_day || 400);
+    const costMat = totalVol * (configParams.mat_rate || 5);
+
+    const estimatedCostTotal = Math.round(costMan + costVehicleBase + costKm + costMat);
+
+    return { 
+        moveVol: totalVol, trashVol, manDays, 
+        vehicleLabel, vehicleCount, vehicleType, rentalDays,
+        extraKm, costKm,
+        estimatedCostTotal, difficultyLabel 
+    };
   }, [inventory, mission, configItems, configParams]);
 
-  // Audio (identique)
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -190,7 +238,6 @@ export default function App() {
   const deleteVoiceNote = (id) => setMission(prev => ({ ...prev, voiceNotes: prev.voiceNotes.filter(n => n.id !== id) }));
   const playVoiceNote = (data) => new Audio(data).play();
 
-  // Envoi
   const handleSubmit = async () => {
     setLoading(true);
     const payload = { ...mission, inventory, stats, date: new Date().toISOString() };
@@ -198,7 +245,7 @@ export default function App() {
       await fetch(GAS_ENDPOINT, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       alert("Envoyé !");
       setInventory({});
-      setMission({ ...mission, comments: '', voiceNotes: [], gps: null });
+      setMission({ ...mission, comments: '', voiceNotes: [], gps: null, distance: '' });
       setStep(1);
     } catch (e) {
       alert("Erreur envoi. Sauvegardé localement.");
@@ -216,8 +263,6 @@ export default function App() {
     </div>
   );
 
-  // --- VIEWS --- (Très similaire, juste configItems au lieu de ITEMS_DB)
-  
   if (step === 1) return (
     <div className="min-h-screen bg-gray-50 pb-20 font-sans">
       {renderHeader("Nouvelle Mission")}
@@ -230,14 +275,19 @@ export default function App() {
           <label className="block text-sm font-medium text-gray-700 mb-1">Nom du Client</label>
           <input type="text" className="w-full p-3 border rounded-lg" placeholder="Ex: ACME Corp" value={mission.clientName} onChange={e => setMission({...mission, clientName: e.target.value})} />
         </div>
-        {/* GPS Block */}
+        
+        {/* NEW: Distance Input */}
+        <div className="bg-white p-4 rounded-lg shadow-sm">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Distance trajet (km)</label>
+          <input type="number" className="w-full p-3 border rounded-lg" placeholder="Distance A vers B" value={mission.distance} onChange={e => setMission({...mission, distance: e.target.value})} />
+          <p className="text-xs text-gray-400 mt-1">Saisir la distance simple (l'app calcule l'aller-retour).</p>
+        </div>
+
         <div className="bg-white p-4 rounded-lg shadow-sm">
            <div className="flex justify-between items-center mb-2"><label className="block text-sm font-medium text-gray-700">Position du Site</label>{mission.gps && <span className="text-xs text-green-600 font-bold bg-green-50 px-2 py-1 rounded">±{Math.round(mission.gps.accuracy)}m</span>}</div>
            {!mission.gps ? <button onClick={getGPS} disabled={gpsLoading} className="w-full py-3 border-2 border-dashed border-blue-200 text-blue-600 rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-blue-50">{gpsLoading ? <span className="animate-pulse">Acquisition...</span> : <><MapPin size={18}/> Obtenir Position GPS</>}</button> : <div className="p-3 bg-blue-50 rounded-lg flex justify-between items-center border border-blue-100"><div className="text-sm font-bold text-gray-800 flex items-center gap-1"><MapPin size={14}/> Position Enregistrée</div><button onClick={() => setMission({...mission, gps: null})} className="text-xs text-red-500 font-bold px-2">X</button></div>}
         </div>
-        {/* Etage */}
         <div className="bg-white p-4 rounded-lg shadow-sm"><label className="block text-sm font-medium text-gray-700 mb-1">Étage / Zone</label><select className="w-full p-3 border rounded-lg bg-white" value={mission.floor} onChange={e => setMission({...mission, floor: e.target.value})}><option value="0">Rez-de-chaussée</option>{[1,2,3,4,5].map(i => <option key={i} value={i}>{i}ème Étage{i>3?'+':''}</option>)}</select></div>
-        {/* Logistique */}
         <div className="bg-white p-4 rounded-lg shadow-sm space-y-4">
           <h3 className="font-semibold text-gray-800">Accès & Logistique</h3>
           <div className="flex items-center justify-between"><span>Ascenseur utilisable ?</span><button onClick={() => setMission({...mission, elevator: !mission.elevator})} className={`px-4 py-2 rounded-lg font-bold ${mission.elevator ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{mission.elevator ? 'OUI' : 'NON'}</button></div>
@@ -249,7 +299,6 @@ export default function App() {
     </div>
   );
 
-  // ECRAN 2 (INVENTAIRE DYNAMIQUE)
   if (step === 2) return (
     <div className="min-h-screen bg-gray-50 pb-24 font-sans">
       {renderHeader(`${mission.clientName}`, () => setStep(1))}
@@ -259,7 +308,6 @@ export default function App() {
         ))}
       </div>
       <div className="p-3 space-y-3">
-        {/* Utilisation de configItems ici */}
         {configItems[activeTab] && configItems[activeTab].map(item => {
           const count = inventory[item.id]?.count || 0;
           const trash = inventory[item.id]?.trash || 0;
@@ -281,7 +329,6 @@ export default function App() {
     </div>
   );
 
-  // ECRAN 3 (SYNTHESE)
   if (step === 3) return (
     <div className="min-h-screen bg-gray-50 pb-20 font-sans">
       {renderHeader("Synthèse", () => setStep(2))}
@@ -294,12 +341,14 @@ export default function App() {
           </div>
           <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 gap-4 text-center">
             <div><div className="text-xl font-bold">{stats.manDays}</div><div className="text-xs text-gray-500">Jours-Hommes</div><div className="text-[10px] text-gray-400">Base {stats.productivityUsed} m³/j</div></div>
-            <div><div className="text-xl font-bold">{stats.trucks20}</div><div className="text-xs text-gray-500">Camions (20m³)</div><div className="text-[10px] text-gray-400">Cap. {configParams.truck_cap || 17}m³</div></div>
+            <div><div className="text-xl font-bold">{stats.vehicleLabel}</div><div className="text-xs text-gray-500">{stats.rentalDays} jour(s)</div>
+            {stats.extraKm > 0 && <div className="text-[10px] text-red-500">+{Math.round(stats.extraKm)} km suppl.</div>}
+            </div>
           </div>
         </div>
         <div className="bg-white rounded-xl shadow p-4 border border-yellow-100 bg-yellow-50">
            <h2 className="text-yellow-700 text-sm font-bold uppercase mb-2 flex items-center gap-2"><Coins size={16}/> Estimation Budget (CHF)</h2>
-           <div className="text-center"><span className="text-2xl font-bold text-gray-800">{stats.estimatedCostMin} - {stats.estimatedCostMax} CHF</span><p className="text-xs text-gray-500 mt-1">Hors taxes. Indicatif.</p></div>
+           <div className="text-center"><span className="text-3xl font-bold text-gray-800">{stats.estimatedCostTotal} CHF</span><p className="text-xs text-gray-500 mt-1">Hors taxes. Inclus: MO, Véhicules, Km, Matériel.</p></div>
         </div>
         <div className="bg-white rounded-xl shadow p-4">
           <textarea className="w-full border rounded p-2 text-sm mb-3" rows="3" placeholder="Commentaires..." value={mission.comments} onChange={e => setMission({...mission, comments: e.target.value})} />
@@ -311,8 +360,6 @@ export default function App() {
     </div>
   );
 
-  // ECRAN 4 & 5 (Historique et Détail)
-  // ... (Identiques à la version précédente, ils utiliseront historyData)
   if (step === 4) return (
     <div className="min-h-screen bg-gray-50 pb-20 font-sans">
       {renderHeader("Historique", () => setStep(1))}
@@ -331,15 +378,20 @@ export default function App() {
           {renderHeader("Détail", () => setStep(4))}
           <div className="p-4 bg-white m-4 rounded shadow">
              <h2 className="font-bold text-xl">{selectedMission.client}</h2>
+             <p className="mt-2 text-sm text-gray-500 flex items-center gap-1"><Car size={14}/> {selectedMission.vehicles}</p>
              <p className="mt-4 text-gray-600">{selectedMission.comments}</p>
-             <div className="mt-4 bg-blue-50 p-4 rounded">
-                Vol: {selectedMission.volMove} m3 <br/>
-                JH: {selectedMission.manDays}
+             <div className="mt-4 bg-blue-50 p-4 rounded text-sm">
+                <strong>Budget Est:</strong> {selectedMission.cost} CHF<br/>
+                <strong>Vol:</strong> {selectedMission.volMove} m3 <br/>
+                <strong>JH:</strong> {selectedMission.manDays}
              </div>
           </div>
         </div>
      );
   }
+
+  return null;
+}
 
   return null;
 }
