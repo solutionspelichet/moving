@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Camera, Trash2, Save, Truck, Users, Box, ArrowRight, Minus, Plus, AlertTriangle, Mic, StopCircle, Play, X, Ruler, MapPin, ExternalLink, History, ArrowLeft, Loader2 } from 'lucide-react';
+import { Camera, Trash2, Save, Truck, Users, Box, ArrowRight, Minus, Plus, AlertTriangle, Mic, StopCircle, Play, X, Ruler, MapPin, ExternalLink, History, ArrowLeft, Loader2, FileText, Calendar, CheckSquare } from 'lucide-react';
 
 // --- CONFIGURATION LOGISTIQUE ---
 const ITEMS_DB = {
@@ -28,15 +28,16 @@ const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbww2G_N9JwKlhErDrB
 
 export default function App() {
   // --- ETAT DE L'APPLICATION ---
-  const [step, setStep] = useState(1); // 1: Info, 2: Inventaire, 3: Synthèse, 4: Historique
+  const [step, setStep] = useState(1); // 1: Info, 2: Inventaire, 3: Synthèse, 4: Historique, 5: Détail Mission
   const [loading, setLoading] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   
-  // Historique
+  // Historique & Détail
   const [historyData, setHistoryData] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [selectedMission, setSelectedMission] = useState(null); // Mission sélectionnée pour le détail
 
-  // Données de mission
+  // Données de mission (Saisie en cours)
   const [mission, setMission] = useState({
     clientName: '',
     siteName: '',
@@ -89,6 +90,11 @@ export default function App() {
     }
   };
 
+  const handleViewDetail = (missionData) => {
+    setSelectedMission(missionData);
+    setStep(5);
+  };
+
   const updateItem = (itemId, type, delta) => {
     setInventory(prev => {
       const current = prev[itemId] || { count: 0, trash: 0 };
@@ -102,7 +108,7 @@ export default function App() {
     });
   };
 
-  // Audio Logic (Simplified for brevity but functional)
+  // Audio Logic
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -163,9 +169,124 @@ export default function App() {
         {backAction && <button onClick={backAction}><ArrowLeft size={20}/></button>}
         <h1 className="text-lg font-bold">{title}</h1>
       </div>
-      {step !== 1 && step !== 4 && <div className="text-xs bg-blue-800 px-2 py-1 rounded">{stats.moveVol.toFixed(1)} m³</div>}
+      {(step === 2 || step === 3) && <div className="text-xs bg-blue-800 px-2 py-1 rounded">{stats.moveVol.toFixed(1)} m³</div>}
     </div>
   );
+
+  // ECRAN 5 : FICHE DE DÉMÉNAGEMENT (DETAIL)
+  if (step === 5 && selectedMission) {
+    // Parsing de l'inventaire sauvegardé
+    let savedInventory = {};
+    try { savedInventory = JSON.parse(selectedMission.inventoryJson || '{}'); } catch(e) {}
+    const hasInventory = Object.keys(savedInventory).length > 0;
+
+    return (
+      <div className="min-h-screen bg-gray-50 pb-20 font-sans">
+        {renderHeader("Fiche Déménagement", () => setStep(4))}
+        
+        <div className="p-4 space-y-4">
+          
+          {/* Header Info */}
+          <div className="bg-white rounded-xl shadow-sm p-4 border-l-4 border-blue-600">
+            <h2 className="text-xl font-bold text-gray-800">{selectedMission.client}</h2>
+            <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
+              <Calendar size={14}/> {new Date(selectedMission.date).toLocaleDateString()}
+            </div>
+            <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
+               <MapPin size={14}/> {selectedMission.site}
+            </div>
+          </div>
+
+          {/* KPI Logistique */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-blue-50 p-2 rounded-lg text-center border border-blue-100">
+               <div className="text-lg font-bold text-blue-700">{Number(selectedMission.volMove).toFixed(1)}</div>
+               <div className="text-[10px] text-gray-500 uppercase">Vol. m³</div>
+            </div>
+            <div className="bg-white p-2 rounded-lg text-center border border-gray-200">
+               <div className="text-lg font-bold text-gray-700">{selectedMission.manDays}</div>
+               <div className="text-[10px] text-gray-500 uppercase">Jours/H</div>
+            </div>
+            <div className="bg-white p-2 rounded-lg text-center border border-gray-200">
+               <div className="text-lg font-bold text-gray-700">{selectedMission.trucks}</div>
+               <div className="text-[10px] text-gray-500 uppercase">Camions</div>
+            </div>
+          </div>
+
+          {/* Accès & GPS */}
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <h3 className="text-sm font-bold uppercase text-gray-500 mb-3 border-b pb-2">Accès & Localisation</h3>
+            <div className="space-y-2 text-sm">
+               <div className="flex justify-between">
+                 <span className="text-gray-500">Accès Immeuble:</span>
+                 <span className="font-medium text-gray-800">{selectedMission.access}</span>
+               </div>
+               <div className="flex justify-between">
+                 <span className="text-gray-500">Stationnement:</span>
+                 <span className="font-medium text-gray-800">{selectedMission.parking}</span>
+               </div>
+               {selectedMission.gps && (
+                 <div className="mt-3 pt-2 border-t">
+                   <a 
+                     href={selectedMission.gps.startsWith('http') ? selectedMission.gps : '#'} 
+                     target="_blank" rel="noreferrer"
+                     className="flex items-center justify-center gap-2 w-full py-2 bg-blue-50 text-blue-600 rounded-lg font-bold text-xs"
+                   >
+                     <MapPin size={16}/> Ouvrir la position GPS dans Maps
+                   </a>
+                 </div>
+               )}
+            </div>
+          </div>
+
+          {/* Commentaires & Audio */}
+          {(selectedMission.comments || selectedMission.audioCount > 0) && (
+             <div className="bg-white rounded-xl shadow-sm p-4">
+               <h3 className="text-sm font-bold uppercase text-gray-500 mb-3 border-b pb-2">Observations</h3>
+               {selectedMission.comments && (
+                 <p className="text-sm text-gray-700 italic bg-gray-50 p-2 rounded mb-2">"{selectedMission.comments}"</p>
+               )}
+               {selectedMission.audioCount > 0 && (
+                 <div className="flex items-center gap-2 text-sm text-blue-600 font-medium">
+                   <Mic size={16}/> {selectedMission.audioCount} note(s) vocale(s) disponible(s) sur Drive.
+                 </div>
+               )}
+             </div>
+          )}
+
+          {/* Liste Inventaire */}
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+             <div className="bg-gray-100 p-3 border-b flex justify-between items-center">
+                <h3 className="text-sm font-bold uppercase text-gray-600">Inventaire Détaillé</h3>
+                <span className="text-xs bg-gray-200 px-2 py-1 rounded text-gray-600">Total m³: {(Number(selectedMission.volMove) + Number(selectedMission.volTrash)).toFixed(1)}</span>
+             </div>
+             {!hasInventory ? (
+               <div className="p-4 text-center text-gray-400 text-sm">Aucun détail d'inventaire disponible.</div>
+             ) : (
+               <ul className="divide-y divide-gray-100">
+                 {Object.entries(savedInventory).map(([id, data]) => {
+                    const itemDef = Object.values(ITEMS_DB).flat().find(i => i.id === id);
+                    if (!itemDef) return null;
+                    return (
+                      <li key={id} className="p-3 flex justify-between items-center text-sm hover:bg-gray-50">
+                        <div>
+                          <span className="font-medium text-gray-800">{itemDef.name}</span>
+                          <div className="text-[10px] text-gray-400">{itemDef.vol} m³ / u</div>
+                        </div>
+                        <div className="flex gap-2">
+                           {data.count > 0 && <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-bold">{data.count}</span>}
+                           {data.trash > 0 && <span className="bg-red-100 text-red-800 px-2 py-1 rounded text-xs font-bold flex items-center gap-1"><Trash2 size={10}/>{data.trash}</span>}
+                        </div>
+                      </li>
+                    );
+                 })}
+               </ul>
+             )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ECRAN 4 : HISTORIQUE
   if (step === 4) return (
@@ -181,23 +302,26 @@ export default function App() {
           <div className="space-y-3">
             {historyData.length === 0 ? <p className="text-center text-gray-400 pt-10">Aucune mission trouvée.</p> : null}
             {historyData.map((row, idx) => (
-              <div key={idx} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+              <button 
+                key={idx} 
+                onClick={() => handleViewDetail(row)}
+                className="w-full text-left bg-white p-4 rounded-xl shadow-sm border border-gray-100 active:scale-[0.98] transition-transform hover:border-blue-300"
+              >
                 <div className="flex justify-between items-start mb-2">
                   <h3 className="font-bold text-gray-800 text-lg">{row.client}</h3>
                   <span className="text-xs text-gray-500">{new Date(row.date).toLocaleDateString()}</span>
                 </div>
-                <div className="text-sm text-gray-600 mb-3">{row.site}</div>
-                <div className="grid grid-cols-2 gap-2 text-center bg-gray-50 p-2 rounded-lg">
+                <div className="text-sm text-gray-600 mb-3 flex items-center gap-1"><MapPin size={12}/> {row.site}</div>
+                <div className="grid grid-cols-2 gap-2 text-center bg-gray-50 p-2 rounded-lg pointer-events-none">
                   <div>
                     <div className="text-lg font-bold text-blue-600">{Number(row.volMove).toFixed(1)} <span className="text-xs">m³</span></div>
                     <div className="text-[10px] uppercase text-gray-400">Déménagement</div>
                   </div>
-                  <div>
-                    <div className="text-lg font-bold text-gray-800">{row.manDays}</div>
-                    <div className="text-[10px] uppercase text-gray-400">Jours/Hommes</div>
+                  <div className="flex items-center justify-center gap-1 text-gray-400">
+                     <span className="text-xs font-bold">Voir Fiche</span> <ArrowRight size={12}/>
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -205,7 +329,7 @@ export default function App() {
     </div>
   );
 
-  // ECRAN 1 : CONFIGURATION (Modifié avec bouton Historique)
+  // ECRAN 1 : CONFIGURATION
   if (step === 1) return (
     <div className="min-h-screen bg-gray-50 pb-20 font-sans">
       {renderHeader("Nouvelle Mission")}
@@ -275,7 +399,7 @@ export default function App() {
     </div>
   );
 
-  // ECRAN 2 & 3 (Restent quasi identiques, je remets le code pour la compilation complète)
+  // ECRAN 2 (INVENTAIRE)
   if (step === 2) return (
     <div className="min-h-screen bg-gray-50 pb-24 font-sans">
       {renderHeader(`${mission.clientName}`, () => setStep(1))}
@@ -306,6 +430,7 @@ export default function App() {
     </div>
   );
 
+  // ECRAN 3 (SYNTHESE)
   if (step === 3) return (
     <div className="min-h-screen bg-gray-50 pb-20 font-sans">
       {renderHeader("Synthèse", () => setStep(2))}
